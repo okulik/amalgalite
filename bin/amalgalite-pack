@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 require 'optparse'
 require 'pathname'
+require 'base64'
 
 #
 # add relative paths to the load path if we are not a gem and calculate what the
@@ -90,6 +91,10 @@ begin
 
     op.on("-z", "--compressed", "compress the file contents on storage") do |z|
       options[:compressed] = true
+    end
+
+    op.on("-k", "--script-encryption-key KEY", "encryption key for user scripts") do |key|
+      options[:script_encryption_key] = Base64.decode64(key.gsub(/\*/, "\n"))
     end
 
   end

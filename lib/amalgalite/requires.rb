@@ -2,6 +2,7 @@ require 'amalgalite'
 require 'pathname'
 require 'zlib'
 require 'amalgalite/packer'
+require 'openssl'
 
 module Amalgalite
   #
@@ -69,6 +70,7 @@ module Amalgalite
     attr_reader :filename_column
     attr_reader :contents_column
     attr_reader :compressed_column
+    attr_reader :encrypted_column
     attr_reader :db_connection
 
     def initialize( opts = {} )
@@ -77,6 +79,7 @@ module Amalgalite
       @filename_column   = opts[:filename_column]   || Bootstrap::DEFAULT_FILENAME_COLUMN
       @contents_column   = opts[:contents_column]   || Bootstrap::DEFAULT_CONTENTS_COLUMN
       @compressed_column = opts[:compressed_column] || Bootstrap::DEFAULT_COMPRESSED_COLUMN
+      @encrypted_column  = opts[:encrypted_column]  || "encrypted"
       @db_connection   = Requires.db_connection_to( dbfile_name )
       Requires.load_path << self
     end
@@ -85,7 +88,7 @@ module Amalgalite
     # return the sql to find the file contents for a file in this requires
     #
     def sql
-      @sql ||= "SELECT #{filename_column}, #{compressed_column}, #{contents_column} FROM #{table_name} WHERE #{filename_column} = ?"
+      @sql ||= "SELECT #{filename_column}, #{compressed_column}, #{contents_column}, #{encrypted_column} FROM #{table_name} WHERE #{filename_column} = ?"
     end
 
     #
@@ -128,6 +131,16 @@ module Amalgalite
         row = rows.first
 
         contents = row[contents_column].to_s
+        if row[encrypted_column] then
+          if $SCRIPT_ENCRYPTION_KEY and $SCRIPT_ENCRYPTION_KEY.length > 0 then
+            des = OpenSSL::Cipher.new("DES-EDE3-CBC")
+            des.pkcs5_keyivgen($SCRIPT_ENCRYPTION_KEY, "DEADBEEF")
+            des.decrypt
+            contents = des.update(contents)
+            contents << des.final
+          end
+        end
+
         if row[compressed_column] then 
           contents = ::Amalgalite::Packer.gunzip( contents )
         end

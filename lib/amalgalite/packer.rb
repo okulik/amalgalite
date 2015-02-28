@@ -20,6 +20,7 @@ module Amalgalite
           :filename_column   => Requires::Bootstrap::DEFAULT_FILENAME_COLUMN,
           :contents_column   => Requires::Bootstrap::DEFAULT_CONTENTS_COLUMN,
           :compressed_column => Requires::Bootstrap::DEFAULT_COMPRESSED_COLUMN,
+          :encrypted_column => "encrypted",
           :strip_prefix      => Dir.pwd,
           :compressed        => false,
           :verbose           => false,
@@ -110,6 +111,7 @@ module Amalgalite
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
       #{options[:filename_column]}   TEXT UNIQUE,
       #{options[:compressed_column]} BOOLEAN,
+      #{options[:encrypted_column]}  BOOLEAN,
       #{options[:contents_column]}   BLOB
       );
       create
@@ -152,7 +154,7 @@ module Amalgalite
               trans.execute( "DELETE FROM #{options[:table_name]} WHERE #{options[:filename_column]} = ?", file_info.require_path )
             end
 
-            trans.prepare("INSERT INTO #{options[:table_name]}(#{options[:filename_column]}, #{options[:compressed_column]}, #{options[:contents_column]}) VALUES( $filename, $compressed, $contents)") do |stmt|
+            trans.prepare("INSERT INTO #{options[:table_name]}(#{options[:filename_column]}, #{options[:compressed_column]}, #{options[:encrypted_column]}, #{options[:contents_column]}) VALUES( $filename, $compressed, $encrypted, $contents)") do |stmt|
               contents = IO.readlines( file_info.file_path )
               if options[:self] then
                 contents.each { |l| l.gsub!( /^(\s*require .*)$/m, "# commented out by #{self.class.name} \\1") }
@@ -162,11 +164,22 @@ module Amalgalite
               if options[:compressed] then
                 contents = Packer.gzip( contents )
               end
+
+              if options[:script_encryption_key] then
+                require 'openssl'
+                des = OpenSSL::Cipher.new("DES-EDE3-CBC")
+                des.pkcs5_keyivgen(options[:script_encryption_key], "DEADBEEF")
+                des.encrypt
+                contents = des.update(contents)
+                contents << des.final
+              end
+
               content_io = StringIO.new( contents )
               stmt.execute( "$filename"   => file_info.require_path,
                             "$contents"   => Amalgalite::Blob.new( :io => content_io,
                                                                    :column => contents_column ),
-                            "$compressed" => options[:compressed] )
+                            "$compressed" => options[:compressed],
+                            "$encrypted"  => options[:script_encryption_key] != nil )
               STDERR.puts "#{msg} stored #{file_info.file_path}" if options[:verbose]
             end
           rescue => e
